@@ -1,118 +1,148 @@
-<!-- 播放器 - 专辑封面 -->
 <template>
-  <div :class="['mian-cover', playCoverType, { playing: playState }]">
+  <div :class="['player-cover', settingStore.playerType, { playing: statusStore.playStatus }]">
     <!-- 指针 -->
     <img
-      v-if="playCoverType === 'record'"
-      :class="{ pointer: true, play: playState }"
-      src="/imgs/pic/pointer.png?assest"
+      v-if="settingStore.playerType === 'record'"
+      class="pointer"
+      src="/images/pointer.png?assest"
       alt="pointer"
     />
     <!-- 专辑图片 -->
-    <n-image
-      :src="
-        music.getPlaySongData?.coverSize?.l ||
-        music.getPlaySongData?.cover ||
-        music.getPlaySongData?.localCover
-      "
-      :style="{
-        animationPlayState: playState ? 'running' : 'paused',
-      }"
+    <s-image
+      :key="musicStore.getSongCover()"
+      :src="musicStore.getSongCover('l')"
       class="cover-img"
-      preview-disabled
-      @load="
-        (e) => {
-          e.target.style.opacity = 1;
-        }
-      "
-    >
-      <template #placeholder>
-        <div class="cover-loading">
-          <img class="loading-img" src="/imgs/pic/song.jpg?assest" alt="loading-img" />
-        </div>
-      </template>
-    </n-image>
-    <!-- 封面背板 -->
-    <n-image
-      class="cover-shadow"
-      preview-disabled
-      :src="
-        music.getPlaySongData?.coverSize?.l ||
-        music.getPlaySongData?.cover ||
-        music.getPlaySongData?.localCover
-      "
     />
+    <!-- 动态封面 -->
+    <Transition name="fade" mode="out-in">
+      <video
+        v-if="dynamicCover && settingStore.dynamicCover && settingStore.playerType === 'cover'"
+        ref="videoRef"
+        :src="dynamicCover"
+        :class="['dynamic-cover', { loaded: dynamicCoverLoaded }]"
+        muted
+        autoplay
+        @loadeddata="dynamicCoverLoaded = true"
+        @ended="dynamicCoverEnded"
+      />
+    </Transition>
   </div>
 </template>
 
-<script setup>
-import { storeToRefs } from "pinia";
-import { musicData, siteStatus, siteSettings } from "@/stores";
+<script setup lang="ts">
+import { songDynamicCover } from "@/api/song";
+import { useSettingStore, useStatusStore, useMusicStore } from "@/stores";
+import { isLogin } from "@/utils/auth";
+import { isEmpty } from "lodash-es";
 
-const music = musicData();
-const status = siteStatus();
-const settings = siteSettings();
-const { playCoverType } = storeToRefs(settings);
-const { playState } = storeToRefs(status);
+const musicStore = useMusicStore();
+const statusStore = useStatusStore();
+const settingStore = useSettingStore();
+
+// 动态封面
+const dynamicCover = ref<string>("");
+const dynamicCoverLoaded = ref<boolean>(false);
+
+// 视频元素
+const videoRef = ref<HTMLVideoElement | null>(null);
+
+// 封面再放送
+const { start: dynamicCoverStart, stop: dynamicCoverStop } = useTimeoutFn(
+  () => {
+    dynamicCoverLoaded.value = true;
+    videoRef.value?.play();
+  },
+  2000,
+  { immediate: false },
+);
+
+// 获取动态封面
+const getDynamicCover = async () => {
+  if (
+    isLogin() !== 1 ||
+    !musicStore.playSong.id ||
+    !settingStore.dynamicCover ||
+    settingStore.playerType !== "cover"
+  )
+    return;
+  dynamicCoverStop();
+  dynamicCoverLoaded.value = false;
+  const result = await songDynamicCover(musicStore.playSong.id);
+  if (!isEmpty(result.data) && result?.data?.videoPlayUrl) {
+    dynamicCover.value = result.data.videoPlayUrl;
+  } else {
+    dynamicCover.value = "";
+  }
+};
+
+// 封面播放结束
+const dynamicCoverEnded = () => {
+  dynamicCoverLoaded.value = false;
+  dynamicCoverStart();
+};
+
+watch(
+  () => [musicStore.playSong.id, settingStore.dynamicCover, settingStore.playerType],
+  () => getDynamicCover(),
+);
+
+onMounted(getDynamicCover);
 </script>
 
 <style lang="scss" scoped>
-.mian-cover {
+.player-cover {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 70%;
-  max-width: 55vh;
+  max-width: 50vh;
   height: auto;
   aspect-ratio: 1 / 1;
-  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+    width 0.3s;
   .cover-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 1;
+    box-shadow: 0 0 20px 10px rgba(0, 0, 0, 0.1);
+    transition: opacity 0.1s ease-in-out;
+  }
+  .dynamic-cover {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
     border-radius: 32px;
     overflow: hidden;
     z-index: 1;
-    box-shadow: 0 0 20px 10px rgb(0 0 0 / 10%);
-    transition: opacity 0.1s ease-in-out;
-    :deep(img) {
-      width: 100%;
-      height: 100%;
-      opacity: 0;
-      transition: opacity 0.3s ease-in-out;
-    }
-  }
-  .cover-shadow {
-    position: absolute;
-    top: 12px;
-    height: 100%;
-    width: 100%;
-    filter: blur(20px) opacity(0.6);
-    transform: scale(0.95);
-    z-index: 0;
-    :deep(img) {
-      width: 100%;
-      height: 100%;
+    opacity: 0;
+    transition: opacity 0.8s ease-in-out;
+    backface-visibility: hidden;
+    transform: translateZ(0);
+    &.loaded {
+      opacity: 1;
     }
   }
   &.record {
     position: relative;
-    width: 55vh;
+    width: 50vh;
     .pointer {
       position: absolute;
       width: 14vh;
       left: calc(50% - 1.8vh);
-      top: -11vh;
+      top: -11.5vh;
       transform: rotate(-20deg);
       transform-origin: 1.8vh 1.8vh;
       z-index: 2;
       transition: transform 0.3s;
-      &.play {
-        transform: rotate(0);
-      }
     }
     .cover-img {
-      animation: playerCoverRotate 18s linear infinite;
+      animation: playerCoverRotate 30s linear infinite;
+      animation-play-state: paused;
       border-radius: 50%;
       border: 1vh solid #ffffff30;
       background: linear-gradient(black 0%, transparent, black 98%),
@@ -200,31 +230,25 @@ const { playState } = storeToRefs(status);
         padding-bottom: 0;
         .loading-img {
           top: auto;
+          left: auto;
         }
       }
     }
-    .cover-shadow {
-      display: none;
-    }
   }
   &.cover {
+    border-radius: 32px;
+    overflow: hidden;
     transform: scale(0.9);
     &.playing {
       transform: scale(1);
     }
   }
-
-  @media (max-width: 700px) {
-    &.record {
-      .pointer {
-        width: 12vh;
-        top: -6vh;
-      }
-      .cover-img {
-        width: 40vh;
-        height: 40vh;
-        min-width: 40vh;
-      }
+  &.playing {
+    .pointer {
+      transform: rotate(0);
+    }
+    .cover-img {
+      animation-play-state: running;
     }
   }
 }
